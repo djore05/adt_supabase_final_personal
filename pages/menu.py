@@ -1,7 +1,11 @@
 import streamlit as st
-import psycopg2
+import requests
 import pandas as pd
 import decimal
+
+# ---- Supabase API Configuration ----
+SUPABASE_URL = "https://db.ftpuapspmqjfblzhxkok.supabase.co"  # Your Supabase URL
+SUPABASE_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw"  # Replace with your Supabase anon API key
 
 # ---- Page Config ----
 st.set_page_config(page_title="TheSpiceNSpirits - Menu", layout="wide")
@@ -23,42 +27,35 @@ with col2:
         st.switch_page("pages/cart.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ---- Database Connection ----
-@st.cache_resource
-def get_connection():
-    return psycopg2.connect(
-        dbname="postgres",
-        user="postgres",
-        password="Quant2ph4@",
-        host="db.ftpuapspmqjfblzhxkok.supabase.co",
-        port="5432",
-        sslmode="require"
-    )
+# ---- Function to Fetch Data from Supabase ----
+def fetch_menu_from_supabase():
+    # Define the endpoint for the menu items table
+    endpoint = f"{SUPABASE_URL}/rest/v1/menu_items"
+    
+    # Set up headers, including the authorization token
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-conn = get_connection()
+    # Add query parameters (if needed)
+    params = {
+        "select": "section_name, subcategory_name, menu_item_id, item_name, description, price, spice_level, dietary_type",
+        "availability": "eq.true",  # Filter for available items
+        "order": "section_name, subcategory_name, item_name"  # Sorting by section, subcategory, item name
+    }
 
-# ---- Helper Query ----
-def run_query(query, params=None):
-    with conn.cursor() as cur:
-        cur.execute(query, params or ())
-        colnames = [desc[0] for desc in cur.description]
-        rows = cur.fetchall()
-        return pd.DataFrame(rows, columns=colnames)
+    # Send GET request to Supabase API
+    response = requests.get(endpoint, headers=headers, params=params)
 
-# ---- Fetch Menu ----
-def fetch_menu():
-    query = """
-        SELECT ms.section_name, msc.subcategory_name, mi.menu_item_id, mi.item_name,
-               mi.description, mi.price, mi.spice_level, mi.dietary_type
-        FROM menu_items mi
-        JOIN menu_subcategories msc ON mi.subcategory_id = msc.subcategory_id
-        JOIN menu_sections ms ON msc.section_id = ms.section_id
-        WHERE mi.availability = TRUE
-        ORDER BY ms.section_name, msc.subcategory_name, mi.item_name
-    """
-    return run_query(query)
+    if response.status_code == 200:
+        return pd.DataFrame(response.json())  # Return as a DataFrame
+    else:
+        st.error(f"Failed to fetch data from Supabase. Status Code: {response.status_code}")
+        return pd.DataFrame()  # Return empty DataFrame in case of error
 
-menu_df = fetch_menu()
+# ---- Fetch Menu from Supabase ----
+menu_df = fetch_menu_from_supabase()
 
 # ---- Sidebar Filters ----
 st.sidebar.markdown("### 🥗 Filter by Dietary Type")
