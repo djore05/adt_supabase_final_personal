@@ -38,24 +38,28 @@ def validate_admin(username, password):
     url = f"{supabase['url']}/rest/v1/employee"
     
     # Query parameters to filter employees with the given title and name
+    # Using "*" instead of "id" to select any column
     params = {
-        "select": "id",
+        "select": "*",  # Select all columns instead of just 'id'
         "title": f"eq.{username}",
-        "employee_name": f"eq.{password}",
-        "limit": 1
+        "employee_name": f"eq.{password}"
     }
     
-    response = requests.get(
-        url,
-        headers=supabase['headers'],
-        params=params
-    )
-    
-    if response.status_code == 200:
-        # If we got results, the admin exists
-        return len(response.json()) > 0
-    else:
-        st.error(f"Database error: {response.status_code}, {response.text}")
+    try:
+        response = requests.get(
+            url,
+            headers=supabase['headers'],
+            params=params
+        )
+        
+        if response.status_code == 200:
+            # If we got results, the admin exists
+            return len(response.json()) > 0
+        else:
+            st.error(f"Database error: {response.status_code}, {response.text}")
+            return False
+    except Exception as e:
+        st.error(f"Error connecting to database: {str(e)}")
         return False
 
 # ---- Login Form ----
