@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import psycopg2
+import requests
 from datetime import datetime
 import time
 
@@ -13,31 +13,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-# # ---- Sidebar Navigation ----
-# with st.sidebar:
-#     st.markdown("### 🌶️ TheSpiceNSpirits")
-#     nav = st.selectbox("☰ Navigate", [
-#         "🏠 Home",
-#         "👨‍💼 Admin Login",
-#         "📋 Menu",
-#         "🛒 Cart",
-#         "📦 Order Summary",
-#         "💳 Payment"
-#     ])
-
-#     if nav == "🏠 Home":
-#         st.switch_page("streamlit_app.py")
-#     elif nav == "👨‍💼 Admin Login":
-#         st.switch_page("pages/admin_login.py")
-#     elif nav == "📋 Menu":
-#         st.switch_page("pages/menu.py")
-#     elif nav == "🛒 Cart":
-#         st.switch_page("pages/cart.py")
-#     elif nav == "📦 Order Summary":
-#         st.switch_page("pages/order_summary.py")
-#     elif nav == "💳 Payment":
-#         pass  # Already on Payment
 
 # ---- Safety Check ----
 if "customer_info" not in st.session_state or "final_cart" not in st.session_state:
@@ -73,32 +48,52 @@ st.markdown(f"### 💰 Total: **${total_price:.2f}**")
 st.markdown("### 🏦 Select Payment Method")
 payment_method = st.radio("Payment Mode", ["Cash", "Credit Card", "Debit Card"], horizontal=True)
 
-# ---- Database Connection ----
+# ---- Supabase Configuration ----
 @st.cache_resource
-def get_connection():
-    return psycopg2.connect(
-        dbname="postgres",
-        user="postgres",
-        password="Quant2ph4@",  # move later to dotenv
-        host="db.ftpuapspmqjfblzhxkok.supabase.co",
-        port="5432",
-        sslmode="require"
-    )
+def get_supabase_client():
+    supabase_url = "https://ftpuapspmqjfblzhxkok.supabase.co"
+    supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    return {
+        "url": supabase_url,
+        "headers": headers
+    }
 
-conn = get_connection()
+supabase = get_supabase_client()
 
 # ---- Insert Order into Database ----
 def insert_order(table_id, order_timestamp, total_price, order_status, employee_id, order_type, payment_method):
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO orders (table_id, order_timestamp, total_price, order_status, employee_id, order_type, payment_method)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (table_id, order_timestamp, total_price, order_status, employee_id, order_type, payment_method))
-        conn.commit()
+    url = f"{supabase['url']}/rest/v1/orders"
+    
+    order_data = {
+        "table_id": table_id,
+        "order_timestamp": order_timestamp.isoformat(),
+        "total_price": total_price,
+        "order_status": order_status,
+        "employee_id": employee_id,
+        "order_type": order_type,
+        "payment_method": payment_method
+    }
+    
+    response = requests.post(
+        url, 
+        json=order_data, 
+        headers=supabase['headers']
+    )
+    
+    if response.status_code in [200, 201]:
+        return True, response.json()
+    else:
+        return False, f"Error: {response.status_code}, {response.text}"
 
 # ---- Confirm Payment ----
 if st.button("✅ Confirm Payment"):
-    insert_order(
+    success, result = insert_order(
         table_id=1,                     # assuming dummy table 1
         order_timestamp=datetime.now(),
         total_price=total_price,
@@ -107,22 +102,27 @@ if st.button("✅ Confirm Payment"):
         order_type="Dine In",
         payment_method=payment_method
     )
+    
+    if success:
+        # Save into session
+        st.session_state.order_summary = {
+            "customer": customer,
+            "cart": cart,
+            "total": total_price,
+            "payment_method": payment_method,
+            "order_id": result[0]["id"] if isinstance(result, list) and len(result) > 0 else None
+        }
 
-    # Save into session
-    st.session_state.order_summary = {
-        "customer": customer,
-        "cart": cart,
-        "total": total_price,
-        "payment_method": payment_method
-    }
+        st.success("💳 Please insert or tap your card in the machine to continue with the payment...")
 
-    st.success("💳 Please insert or tap your card in the machine to continue with the payment...")
+        with st.empty():
+            for i in range(10, 0, -1):
+                st.warning(f"⏳ Waiting for card... {i} seconds remaining")
+                time.sleep(1)
+            st.success("✅ Payment successful and order confirmed!")
+            st.balloons()
 
-    with st.empty():
-        for i in range(10, 0, -1):
-            st.warning(f"⏳ Waiting for card... {i} seconds remaining")
-            time.sleep(1)
-        st.success("✅ Payment successful and order confirmed!")
-        st.balloons()
-
-    st.switch_page("pages/order_summary.py")
+        st.switch_page("pages/order_summary.py")
+    else:
+        st.error(f"Failed to process order: {result}")
+        st.info("Please try again or contact support.")
