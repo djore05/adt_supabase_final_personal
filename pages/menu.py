@@ -23,42 +23,110 @@ with col2:
         st.switch_page("pages/cart.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# Supabase API URL and API Key
-url = "https://ftpuapspmqjfblzhxkok.supabase.co/rest/v1/menu_items"
-headers = {
-    "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw",
-    "Content-Type": "application/json"
-}
+# ---- Supabase Configuration ----
+@st.cache_resource
+def get_supabase_client():
+    supabase_url = "https://ftpuapspmqjfblzhxkok.supabase.co"
+    supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    return {
+        "url": supabase_url,
+        "headers": headers
+    }
 
-# Function to fetch data from Supabase
-def fetch_data_from_supabase():
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.json()  # Return JSON data if request is successful
+supabase = get_supabase_client()
+
+# ---- Helper Query Function ----
+def run_query(query_type, table, params=None):
+    """
+    Execute queries against Supabase REST API
+    query_type: 'select', 'rpc' (for stored procedures)
+    table: table name or procedure name
+    params: dictionary of parameters
+    """
+    base_url = f"{supabase['url']}/rest/v1"
+    
+    if query_type == 'select':
+        url = f"{base_url}/{table}"
+        response = requests.get(url, headers=supabase['headers'], params=params)
+    elif query_type == 'rpc':
+        url = f"{base_url}/rpc/{table}"
+        response = requests.post(url, json=params, headers=supabase['headers'])
     else:
-        st.error(f"Failed to fetch data from Supabase. Status Code: {response.status_code}")
-        return []
+        raise ValueError(f"Unsupported query type: {query_type}")
+    
+    if response.status_code == 200:
+        return pd.DataFrame(response.json())
+    else:
+        st.error(f"Error executing query: {response.status_code}, {response.text}")
+        return pd.DataFrame()
 
 # ---- Fetch Menu ----
 def fetch_menu():
-    menu_data = fetch_data_from_supabase()
-
-    if not menu_data:
-        st.warning("No menu items found.")
+    # Using a custom SQL query with Supabase's PostgreSQL functions
+    params = {
+        "name": "get_menu_items",
+        "args": {}
+    }
+    
+    try:
+        # First attempt: Try to use a stored procedure if available
+        menu_df = run_query('rpc', 'get_menu_items', params={})
+        
+        # If we didn't get expected columns, we'll try direct table joins
+        if menu_df.empty or 'section_name' not in menu_df.columns:
+            # Fallback to direct query from tables
+            menu_items = run_query('select', 'menu_items', {
+                'select': 'menu_item_id,item_name,description,price,spice_level,dietary_type,availability,subcategory_id',
+                'availability': 'eq.true'
+            })
+            
+            subcategories = run_query('select', 'menu_subcategories', {
+                'select': 'subcategory_id,subcategory_name,section_id'
+            })
+            
+            sections = run_query('select', 'menu_sections', {
+                'select': 'section_id,section_name'
+            })
+            
+            # Merge dataframes to simulate JOIN
+            if not menu_items.empty and not subcategories.empty and not sections.empty:
+                # Step 1: Join menu_items with subcategories
+                merged_df = pd.merge(
+                    menu_items, 
+                    subcategories, 
+                    on='subcategory_id', 
+                    how='inner'
+                )
+                
+                # Step 2: Join with sections
+                menu_df = pd.merge(
+                    merged_df, 
+                    sections, 
+                    on='section_id', 
+                    how='inner'
+                )
+            else:
+                st.error("Could not retrieve menu data from tables")
+                return pd.DataFrame()
+    
+    except Exception as e:
+        st.error(f"Error fetching menu: {e}")
         return pd.DataFrame()
-
-    # Convert the JSON response to a DataFrame
-    menu_df = pd.DataFrame(menu_data)
-
-    # Check for expected columns in the data
-    expected_columns = ['section_name', 'subcategory_name', 'menu_item_id', 'item_name', 'description', 'price', 'spice_level', 'dietary_type']
-    for col in expected_columns:
-        if col not in menu_df.columns:
-            st.warning(f"Missing expected column: {col}")
     
     return menu_df
 
 menu_df = fetch_menu()
+
+# Handle potential empty dataframe
+if menu_df.empty:
+    st.error("Could not retrieve menu data")
+    st.stop()
 
 # ---- Sidebar Filters ----
 st.sidebar.markdown("### 🥗 Filter by Dietary Type")
