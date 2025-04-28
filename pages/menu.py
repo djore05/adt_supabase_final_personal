@@ -50,23 +50,15 @@ def fetch_menu():
     # Convert the JSON response to a DataFrame
     menu_df = pd.DataFrame(menu_data)
 
-    # Debug: Print out the columns to check the structure of the data
-    st.write("Fetched Data Columns:", menu_df.columns)
-
     # Check for expected columns in the data
     expected_columns = ['section_name', 'subcategory_name', 'menu_item_id', 'item_name', 'description', 'price', 'spice_level', 'dietary_type']
     for col in expected_columns:
         if col not in menu_df.columns:
             st.warning(f"Missing expected column: {col}")
     
-    # If necessary, add checks or modify the column names if the API response structure is different
     return menu_df
 
 menu_df = fetch_menu()
-
-# Check if the DataFrame is empty after the fetch
-if menu_df.empty:
-    st.stop()
 
 # ---- Sidebar Filters ----
 st.sidebar.markdown("### 🥗 Filter by Dietary Type")
