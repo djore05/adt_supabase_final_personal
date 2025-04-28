@@ -1,5 +1,5 @@
 import streamlit as st
-import psycopg2
+import requests
 import pandas as pd
 import decimal
 
@@ -57,28 +57,43 @@ if st.button("🗑️ Clear Entire Cart"):
 st.markdown("---")
 st.markdown("### 🧾 Enter your Details")
 
-# ---- Database Connection ----
+# ---- Supabase Configuration ----
 @st.cache_resource
-def get_connection():
-    return psycopg2.connect(
-        dbname="postgres",
-        user="postgres",
-        password="Quant2ph4@",  # move later to dotenv
-        host="db.ftpuapspmqjfblzhxkok.supabase.co",
-        port="5432",
-        sslmode="require"
-    )
+def get_supabase_client():
+    supabase_url = "https://ftpuapspmqjfblzhxkok.supabase.co"
+    supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    return {
+        "url": supabase_url,
+        "headers": headers
+    }
 
-conn = get_connection()
+supabase = get_supabase_client()
 
 # ---- Insert Customer Info Function ----
 def insert_customer(name, mobile, email):
-    with conn.cursor() as cur:
-        cur.execute("""
-            INSERT INTO customer (name, mobile, email)
-            VALUES (%s, %s, %s)
-        """, (name, mobile, email))
-        conn.commit()
+    url = f"{supabase['url']}/rest/v1/customer"
+    customer_data = {
+        "name": name,
+        "mobile": mobile,
+        "email": email
+    }
+    
+    response = requests.post(
+        url, 
+        json=customer_data, 
+        headers=supabase['headers']
+    )
+    
+    if response.status_code in [200, 201]:
+        return True, response.json()
+    else:
+        return False, f"Error: {response.status_code}, {response.text}"
 
 # ---- Form to Save Customer and Proceed to Payment ----
 with st.form("customer_form"):
@@ -86,22 +101,24 @@ with st.form("customer_form"):
     mobile = st.text_input("Mobile Number")
     email = st.text_input("Email Address")
     submit_customer = st.form_submit_button("💳 Proceed to Payment")
-
+    
     if submit_customer:
         if not name or not mobile:
             st.error("Please provide at least a name and mobile number.")
         else:
-            # Save into database
-            insert_customer(name, mobile, email)
-
-            # Save into session for next page
-            st.session_state.customer_info = {
-                "name": name,
-                "mobile": mobile,
-                "email": email
-            }
-            st.session_state.final_cart = st.session_state.cart.copy()
-            st.session_state.total_cost = float(total)  # Make sure total is float not Decimal
-
-            st.success("✅ Customer information saved!")
-            st.switch_page("pages/payment.py")
+            # Save into database using Supabase
+            success, result = insert_customer(name, mobile, email)
+            
+            if success:
+                # Save into session for next page
+                st.session_state.customer_info = {
+                    "name": name,
+                    "mobile": mobile,
+                    "email": email
+                }
+                st.session_state.final_cart = st.session_state.cart.copy()
+                st.session_state.total_cost = float(total)  # Make sure total is float not Decimal
+                st.success("✅ Customer information saved!")
+                st.switch_page("pages/payment.py")
+            else:
+                st.error(f"Failed to save customer information: {result}")
