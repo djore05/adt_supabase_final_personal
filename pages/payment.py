@@ -104,13 +104,22 @@ if st.button("✅ Confirm Payment"):
     )
     
     if success:
-        # Save into session
+        # For debugging
+        #st.write("Response from Supabase:", result)
+        
+        # Save into session (safely get order_id if available)
+        order_id = None
+        if isinstance(result, list) and len(result) > 0 and "id" in result[0]:
+            order_id = result[0]["id"]
+        elif isinstance(result, dict) and "id" in result:
+            order_id = result["id"]
+            
         st.session_state.order_summary = {
             "customer": customer,
             "cart": cart,
             "total": total_price,
             "payment_method": payment_method,
-            "order_id": result[0]["id"] if isinstance(result, list) and len(result) > 0 else None
+            "order_id": order_id
         }
 
         st.success("💳 Please insert or tap your card in the machine to continue with the payment...")
