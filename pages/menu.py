@@ -42,85 +42,84 @@ def get_supabase_client():
 supabase = get_supabase_client()
 
 # ---- Helper Query Function ----
-def run_query(query_type, table, params=None):
+def run_query(table, params=None):
     """
-    Execute queries against Supabase REST API
-    query_type: 'select', 'rpc' (for stored procedures)
-    table: table name or procedure name
-    params: dictionary of parameters
+    Execute SELECT queries against Supabase REST API
+    table: table name
+    params: dictionary of parameters for filtering, etc.
     """
-    base_url = f"{supabase['url']}/rest/v1"
+    url = f"{supabase['url']}/rest/v1/{table}"
     
-    if query_type == 'select':
-        url = f"{base_url}/{table}"
-        response = requests.get(url, headers=supabase['headers'], params=params)
-    elif query_type == 'rpc':
-        url = f"{base_url}/rpc/{table}"
-        response = requests.post(url, json=params, headers=supabase['headers'])
-    else:
-        raise ValueError(f"Unsupported query type: {query_type}")
+    response = requests.get(url, headers=supabase['headers'], params=params)
     
     if response.status_code == 200:
         return pd.DataFrame(response.json())
     else:
-        st.error(f"Error executing query: {response.status_code}, {response.text}")
+        st.error(f"Error executing query on table {table}: {response.status_code}, {response.text}")
         return pd.DataFrame()
 
 # ---- Fetch Menu ----
 def fetch_menu():
-    # Using a custom SQL query with Supabase's PostgreSQL functions
-    params = {
-        "name": "get_menu_items",
-        "args": {}
-    }
-    
     try:
-        # First attempt: Try to use a stored procedure if available
-        menu_df = run_query('rpc', 'get_menu_items', params={})
+        # Query each table individually
+        menu_items = run_query('menu_items', {
+            'select': 'menu_item_id,item_name,description,price,spice_level,dietary_type,availability,subcategory_id',
+            'availability': 'eq.true'
+        })
         
-        # If we didn't get expected columns, we'll try direct table joins
-        if menu_df.empty or 'section_name' not in menu_df.columns:
-            # Fallback to direct query from tables
-            menu_items = run_query('select', 'menu_items', {
-                'select': 'menu_item_id,item_name,description,price,spice_level,dietary_type,availability,subcategory_id',
-                'availability': 'eq.true'
-            })
+        subcategories = run_query('menu_subcategories', {
+            'select': 'subcategory_id,subcategory_name,section_id'
+        })
+        
+        sections = run_query('menu_sections', {
+            'select': 'section_id,section_name'
+        })
+        
+        # Check if we have data from all tables
+        if menu_items.empty or subcategories.empty or sections.empty:
+            missing_tables = []
+            if menu_items.empty: missing_tables.append("menu_items")
+            if subcategories.empty: missing_tables.append("menu_subcategories")
+            if sections.empty: missing_tables.append("menu_sections")
             
-            subcategories = run_query('select', 'menu_subcategories', {
-                'select': 'subcategory_id,subcategory_name,section_id'
-            })
-            
-            sections = run_query('select', 'menu_sections', {
-                'select': 'section_id,section_name'
-            })
-            
-            # Merge dataframes to simulate JOIN
-            if not menu_items.empty and not subcategories.empty and not sections.empty:
-                # Step 1: Join menu_items with subcategories
-                merged_df = pd.merge(
-                    menu_items, 
-                    subcategories, 
-                    on='subcategory_id', 
-                    how='inner'
-                )
-                
-                # Step 2: Join with sections
-                menu_df = pd.merge(
-                    merged_df, 
-                    sections, 
-                    on='section_id', 
-                    how='inner'
-                )
-            else:
-                st.error("Could not retrieve menu data from tables")
-                return pd.DataFrame()
+            st.error(f"Could not retrieve data from tables: {', '.join(missing_tables)}")
+            return pd.DataFrame()
+        
+        # Step 1: Join menu_items with subcategories
+        merged_df = pd.merge(
+            menu_items, 
+            subcategories, 
+            on='subcategory_id', 
+            how='inner'
+        )
+        
+        # Step 2: Join with sections
+        menu_df = pd.merge(
+            merged_df, 
+            sections, 
+            on='section_id', 
+            how='inner'
+        )
+        
+        # Sort the result similar to the original SQL query
+        menu_df = menu_df.sort_values(by=['section_name', 'subcategory_name', 'item_name'])
+        
+        # Check if we have the required columns for the UI
+        required_columns = ['section_name', 'subcategory_name', 'menu_item_id', 
+                           'item_name', 'description', 'price', 'spice_level', 'dietary_type']
+        
+        missing_columns = [col for col in required_columns if col not in menu_df.columns]
+        if missing_columns:
+            st.error(f"Missing required columns in query result: {', '.join(missing_columns)}")
+            return pd.DataFrame()
+        
+        return menu_df
     
     except Exception as e:
-        st.error(f"Error fetching menu: {e}")
+        st.error(f"Error fetching menu: {str(e)}")
         return pd.DataFrame()
-    
-    return menu_df
 
+# Fetch menu data
 menu_df = fetch_menu()
 
 # Handle potential empty dataframe
