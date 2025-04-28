@@ -1,5 +1,5 @@
 import streamlit as st
-import psycopg2
+import requests
 import pandas as pd
 
 # ---- Page Config ----
@@ -15,43 +15,55 @@ st.markdown("""
 # ---- Title ----
 st.title("👨‍💼 Admin Login - TheSpiceNSpirits")
 
-# ---- Database Connection (psycopg2) ----
+# ---- Supabase Configuration ----
 @st.cache_resource
-def get_connection():
-    conn = psycopg2.connect(
-        dbname="postgres",
-        user="postgres",
-        password="Quant2ph4@",
-        host="db.ftpuapspmqjfblzhxkok.supabase.co",
-        port="5432",
-        sslmode="require"  # <-- Force SSL here
-    )
-    return conn
+def get_supabase_client():
+    supabase_url = "https://ftpuapspmqjfblzhxkok.supabase.co"
+    supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0cHVhcHNwbXFqZmJsemh4a29rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MDMwMzEsImV4cCI6MjA2MTM3OTAzMX0.nm3UhSuArd46urs25uz5V7Lo4xnYEwnzqfpRUoP_Dcw"
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    return {
+        "url": supabase_url,
+        "headers": headers
+    }
+
+supabase = get_supabase_client()
 
 # ---- Validate Admin Login ----
 def validate_admin(username, password):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT 1 FROM employee
-        WHERE title = %s AND employee_name = %s
-        LIMIT 1
-    """, (username, password))
+    url = f"{supabase['url']}/rest/v1/employee"
     
-    result = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return result is not None
+    # Query parameters to filter employees with the given title and name
+    params = {
+        "select": "id",
+        "title": f"eq.{username}",
+        "employee_name": f"eq.{password}",
+        "limit": 1
+    }
+    
+    response = requests.get(
+        url,
+        headers=supabase['headers'],
+        params=params
+    )
+    
+    if response.status_code == 200:
+        # If we got results, the admin exists
+        return len(response.json()) > 0
+    else:
+        st.error(f"Database error: {response.status_code}, {response.text}")
+        return False
 
 # ---- Login Form ----
 with st.form("admin_login_form"):
     username = st.text_input("Enter your Username")
     password = st.text_input("Enter your Password", type="password")
     submitted = st.form_submit_button("Login")
-
+    
     if submitted:
         if validate_admin(username, password):
             st.success("Login successful! Redirecting to admin dashboard...")
